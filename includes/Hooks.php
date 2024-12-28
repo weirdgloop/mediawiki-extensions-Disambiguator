@@ -8,11 +8,11 @@
 
 namespace MediaWiki\Extension\Disambiguator;
 
-use Config;
-use ExtensionRegistry;
-use LinksUpdate;
 use MediaWiki\ChangeTags\Hook\ChangeTagsListActiveHook;
 use MediaWiki\ChangeTags\Hook\ListDefinedTagsHook;
+use MediaWiki\Config\Config;
+use MediaWiki\Deferred\LinksUpdate\LinksTable;
+use MediaWiki\Deferred\LinksUpdate\LinksUpdate;
 use MediaWiki\EditPage\EditPage;
 use MediaWiki\Extension\Disambiguator\Specials\SpecialDisambiguationPageLinks;
 use MediaWiki\Extension\Disambiguator\Specials\SpecialDisambiguationPages;
@@ -25,9 +25,11 @@ use MediaWiki\Hook\RandomPageQueryHook;
 use MediaWiki\Hook\RecentChange_saveHook;
 use MediaWiki\Hook\ShortPagesQueryHook;
 use MediaWiki\MediaWikiServices;
+use MediaWiki\Output\OutputPage;
+use MediaWiki\Page\PageStore;
+use MediaWiki\Registration\ExtensionRegistry;
 use MediaWiki\SpecialPage\Hook\WgQueryPagesHook;
 use MediaWiki\Title\Title;
-use OutputPage;
 
 // phpcs:disable MediaWiki.NamingConventions.LowerCamelFunctionsName.FunctionName
 class Hooks implements
@@ -54,16 +56,20 @@ class Hooks implements
 	/** @var bool */
 	private $showNotifications;
 
+	private PageStore $pageStore;
+
 	/** @var bool[] Rev IDs are used as keys */
 	private static $revsToTag = [];
 
 	/**
 	 * @param Lookup $lookup
 	 * @param Config $options
+	 * @param PageStore $pageStore
 	 */
-	public function __construct( Lookup $lookup, Config $options ) {
+	public function __construct( Lookup $lookup, Config $options, PageStore $pageStore ) {
 		$this->lookup = $lookup;
 		$this->showNotifications = $options->get( 'DisambiguatorNotifications' );
+		$this->pageStore = $pageStore;
 	}
 
 	/**
@@ -142,21 +148,6 @@ class Hooks implements
 	}
 
 	/**
-	 * Convenience function for testing whether or not a page is a disambiguation page
-	 *
-	 * @deprecated Use DisambiguatorLookup service
-	 *
-	 * @param Title $title object of a page
-	 * @param bool $includeRedirects Whether to consider redirects to disambiguations as
-	 *   disambiguations.
-	 * @return bool
-	 */
-	public static function isDisambiguationPage( Title $title, $includeRedirects = true ) {
-		return MediaWikiServices::getInstance()->getService( 'DisambiguatorLookup' )
-			->isDisambiguationPage( $title, $includeRedirects );
-	}
-
-	/**
 	 * Add 'mw-disambig' CSS class to links to disambiguation pages.
 	 * @param array $pageIdToDbKey Prefixed DB keys of the pages linked to, indexed by page_id
 	 * @param array &$colours CSS classes, indexed by prefixed DB keys
@@ -168,8 +159,9 @@ class Hooks implements
 			return;
 		}
 
-		$pageIds = MediaWikiServices::getInstance()->getService( 'DisambiguatorLookup' )
-			->filterDisambiguationPageIds( array_keys( $pageIdToDbKey ) );
+		$pageIds = $this->lookup->filterDisambiguationPageIds(
+			array_keys( $pageIdToDbKey )
+		);
 
 		foreach ( $pageIds as $pageId ) {
 			if ( isset( $colours[ $pageIdToDbKey[$pageId] ] ) ) {
@@ -206,15 +198,19 @@ class Hooks implements
 	 * @param LinksUpdate $linksUpdate
 	 */
 	public function onLinksUpdateComplete( LinksUpdate $linksUpdate ) {
-		$addedLinks = $linksUpdate->getAddedLinks();
+		$addedLinks = $linksUpdate->getPageReferenceIterator( 'pagelinks', LinksTable::INSERTED );
 
-		if ( !$addedLinks ) {
-			return;
+		$pageIds = [];
+		foreach ( $addedLinks as $pageReference ) {
+			$pageRecord = $this->pageStore->getPageByReference( $pageReference );
+			if ( $pageRecord ) {
+				$pageIds[] = $pageRecord->getId();
+			}
 		}
 
-		$pageIds = array_map( static function ( Title $title ) {
-			return $title->getId();
-		}, $addedLinks );
+		if ( !$pageIds ) {
+			return;
+		}
 
 		$disambigs = $this->lookup->filterDisambiguationPageIds( $pageIds, true );
 		$rev = $linksUpdate->getRevisionRecord();
@@ -244,10 +240,7 @@ class Hooks implements
 		}
 	}
 
-	/**
-	 * @inheritDoc
-	 */
-	// phpcs:disable MediaWiki.NamingConventions.LowerCamelFunctionsName.FunctionName
+	/** @inheritDoc */
 	public function onRecentChange_save( $recentChange ) {
 		$revId = $recentChange->getAttribute( 'rc_this_oldid' );
 		if ( $recentChange->getAttribute( 'rc_log_type' ) ) {

@@ -8,7 +8,7 @@
 	"descriptionmsg": "disambig-desc",
 	"license-name": "MIT",
 	"requires": {
-		"MediaWiki": ">= 1.41"
+		"MediaWiki": ">= 1.43"
 	},
 	"type": "other",
 	"ExtensionMessagesFiles": {
@@ -34,7 +34,8 @@
 			"class": "MediaWiki\\Extension\\Disambiguator\\Hooks",
 			"services": [
 				"DisambiguatorLookup",
-				"MainConfig"
+				"MainConfig",
+				"PageStore"
 			]
 		}
 	},
@@ -45,7 +46,6 @@
 	},
 	"ResourceModules": {
 		"ext.disambiguator": {
-			"es6": true,
 			"dependencies": [
 				"mediawiki.api",
 				"mediawiki.jqueryMsg",
@@ -94,7 +94,7 @@
 			"class": "MediaWiki\\Extension\\Disambiguator\\Specials\\SpecialDisambiguationPages",
 			"services": [
 				"LinkBatchFactory",
-				"DBLoadBalancer"
+				"ConnectionProvider"
 			]
 		},
 		"DisambiguationPageLinks": {
